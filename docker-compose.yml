@@ -1,0 +1,16 @@
+version: '3.8'
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: payroll-service
+    ports:
+      - "8003:8000"
+    volumes:
+      - .:/app
+    environment:
+      - DB_CONNECTION=sqlite
+      - DB_DATABASE=/app/database/database.sqlite
+      - IAE_KEY=102022400032
