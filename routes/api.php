@@ -8,7 +8,9 @@ use App\Http\Middleware\CheckIaeKey;
 
 Route::middleware([CheckIaeKey::class])->prefix('v1')->group(function () {
     Route::get('/payroll-slips', [PayrollController::class, 'index']);
+    Route::get('/payroll-slips/{id}', [PayrollController::class, 'show']);
     Route::get('/payroll-slips/{nip}/{tahun}/{bulan}', [PayrollController::class, 'showByPeriod']);
+    Route::post('/payroll-slips', [PayrollController::class, 'store']);
     Route::post('/payroll-runs', [PayrollController::class, 'runPayroll']);
     
     Route::get('/sso/token-test', [SsoProgressController::class, 'tokenTest']);

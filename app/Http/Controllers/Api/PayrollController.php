@@ -2,14 +2,17 @@
 
 namespace App\Http\Controllers\Api;
 
-use App\Services\IaeCloudSsoService;
-use App\Services\IaeSoapAuditService;
-use App\Services\IaeRabbitMqPublisherService;
 use App\Http\Controllers\Controller;
 use App\Models\PayrollSlip;
+use App\Services\AbsensiServiceClient;
+use App\Services\EmployeeServiceClient;
+use App\Services\IaeCloudSsoService;
+use App\Services\IaeRabbitMqPublisherService;
+use App\Services\IaeSoapAuditService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 use OpenApi\Annotations as OA;
+
 /**
  * @OA\Info(
  *     title="Payroll Service API",
@@ -23,97 +26,258 @@ use OpenApi\Annotations as OA;
  *     in="header",
  *     name="X-IAE-KEY"
  * )
+ *
+ * @OA\Schema(
+ *     schema="PayrollSlip",
+ *     type="object",
+ *     @OA\Property(property="id", type="integer", example=1),
+ *     @OA\Property(property="nip", type="string", example="EMP001"),
+ *     @OA\Property(property="employee_name", type="string", example="Farhan Chanafi"),
+ *     @OA\Property(property="tahun", type="integer", example=2026),
+ *     @OA\Property(property="bulan", type="integer", example=6),
+ *     @OA\Property(property="gaji_pokok", type="number", format="float", example=5000000),
+ *     @OA\Property(property="tunjangan_tetap", type="number", format="float", example=1000000),
+ *     @OA\Property(property="jumlah_hadir", type="integer", example=20),
+ *     @OA\Property(property="jumlah_izin", type="integer", example=1),
+ *     @OA\Property(property="jumlah_sakit", type="integer", example=1),
+ *     @OA\Property(property="jumlah_alpha", type="integer", example=2),
+ *     @OA\Property(property="potongan_absensi", type="number", format="float", example=200000),
+ *     @OA\Property(property="total_gaji", type="number", format="float", example=5800000),
+ *     @OA\Property(property="status", type="string", example="Selesai")
+ * )
  */
 class PayrollController extends Controller
 {
-    
     private function successResponse($message, $data = null, $code = 200)
     {
         return response()->json([
-            'status' => 'success',
+            'status'  => 'success',
             'message' => $message,
-            'data' => $data,
-            'meta' => [
-                'service_name' => 'Payroll-Service',
-                'api_version' => 'v1'
-            ]
+            'data'    => $data,
+            'meta'    => ['service_name' => 'Payroll-Service', 'api_version' => 'v1'],
         ], $code);
     }
 
     private function errorResponse($message, $errors = null, $code = 400)
     {
         return response()->json([
-            'status' => 'error',
+            'status'  => 'error',
             'message' => $message,
-            'errors' => $errors
+            'errors'  => $errors,
         ], $code);
     }
-/**
- * @OA\Get(
- *     path="/api/v1/payroll-slips",
- *     summary="Menampilkan seluruh slip gaji",
- *     tags={"Payroll"},
- *     security={{"iaeKey":{}}},
- *     @OA\Response(
- *         response=200,
- *         description="Payroll slips retrieved successfully"
- *     ),
- *     @OA\Response(
- *         response=401,
- *         description="Unauthorized"
- *     )
- * )
- */
+
+    /**
+     * @OA\Get(
+     *     path="/api/v1/payroll-slips",
+     *     summary="Menampilkan seluruh slip gaji",
+     *     tags={"Payroll"},
+     *     security={{"iaeKey":{}}},
+     *     @OA\Response(
+     *         response=200,
+     *         description="Payroll slips retrieved successfully",
+     *         @OA\JsonContent(
+     *             type="object",
+     *             @OA\Property(property="status", type="string", example="success"),
+     *             @OA\Property(property="message", type="string", example="Payroll slips retrieved successfully"),
+     *             @OA\Property(property="data", type="array", @OA\Items(ref="#/components/schemas/PayrollSlip")),
+     *             @OA\Property(
+     *                 property="meta",
+     *                 type="object",
+     *                 @OA\Property(property="service_name", type="string", example="Payroll-Service"),
+     *                 @OA\Property(property="api_version", type="string", example="v1")
+     *             )
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=401,
+     *         description="Unauthorized",
+     *         @OA\JsonContent(
+     *             type="object",
+     *             @OA\Property(property="status", type="string", example="error"),
+     *             @OA\Property(property="message", type="string", example="Unauthorized"),
+     *             @OA\Property(property="errors", nullable=true)
+     *         )
+     *     )
+     * )
+     */
     public function index()
     {
-        $payrollSlips = PayrollSlip::all();
-
         return $this->successResponse(
             'Payroll slips retrieved successfully',
-            $payrollSlips
+            PayrollSlip::orderBy('tahun', 'desc')->orderBy('bulan', 'desc')->get()
         );
     }
-/**
- * @OA\Get(
- *     path="/api/v1/payroll-slips/{nip}/{tahun}/{bulan}",
- *     summary="Menampilkan detail slip gaji berdasarkan NIP, tahun, dan bulan",
- *     tags={"Payroll"},
- *     security={{"iaeKey":{}}},
- *     @OA\Parameter(
- *         name="nip",
- *         in="path",
- *         required=true,
- *         description="NIP karyawan",
- *         @OA\Schema(type="string", example="EMP001")
- *     ),
- *     @OA\Parameter(
- *         name="tahun",
- *         in="path",
- *         required=true,
- *         description="Tahun penggajian",
- *         @OA\Schema(type="integer", example=2026)
- *     ),
- *     @OA\Parameter(
- *         name="bulan",
- *         in="path",
- *         required=true,
- *         description="Bulan penggajian",
- *         @OA\Schema(type="integer", example=5)
- *     ),
- *     @OA\Response(
- *         response=200,
- *         description="Payroll slip retrieved successfully"
- *     ),
- *     @OA\Response(
- *         response=404,
- *         description="Payroll slip not found"
- *     ),
- *     @OA\Response(
- *         response=401,
- *         description="Unauthorized"
- *     )
- * )
- */
+
+    /**
+     * @OA\Get(
+     *     path="/api/v1/payroll-slips/{id}",
+     *     summary="Menampilkan detail slip gaji berdasarkan ID",
+     *     tags={"Payroll"},
+     *     security={{"iaeKey":{}}},
+     *     @OA\Parameter(
+     *         name="id",
+     *         in="path",
+     *         required=true,
+     *         description="Primary key slip gaji",
+     *         @OA\Schema(type="integer", example=1)
+     *     ),
+     *     @OA\Response(
+     *         response=200,
+     *         description="Payroll slip retrieved successfully",
+     *         @OA\JsonContent(
+     *             type="object",
+     *             @OA\Property(property="status", type="string", example="success"),
+     *             @OA\Property(property="message", type="string", example="Payroll slip retrieved successfully"),
+     *             @OA\Property(property="data", ref="#/components/schemas/PayrollSlip"),
+     *             @OA\Property(
+     *                 property="meta",
+     *                 type="object",
+     *                 @OA\Property(property="service_name", type="string", example="Payroll-Service"),
+     *                 @OA\Property(property="api_version", type="string", example="v1")
+     *             )
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=404,
+     *         description="Payroll slip not found",
+     *         @OA\JsonContent(
+     *             type="object",
+     *             @OA\Property(property="status", type="string", example="error"),
+     *             @OA\Property(property="message", type="string", example="Payroll slip not found"),
+     *             @OA\Property(property="errors", nullable=true)
+     *         )
+     *     ),
+     *     @OA\Response(response=401, description="Unauthorized")
+     * )
+     */
+    public function show($id)
+    {
+        $payrollSlip = PayrollSlip::find($id);
+
+        if (! $payrollSlip) {
+            return $this->errorResponse('Payroll slip not found', null, 404);
+        }
+
+        return $this->successResponse('Payroll slip retrieved successfully', $payrollSlip);
+    }
+
+    /**
+     * @OA\Post(
+     *     path="/api/v1/payroll-slips",
+     *     summary="Membuat slip gaji secara standalone",
+     *     description="Membuat atau memperbarui slip berdasarkan NIP dan periode tanpa memanggil service eksternal.",
+     *     tags={"Payroll"},
+     *     security={{"iaeKey":{}}},
+     *     @OA\RequestBody(
+     *         required=true,
+     *         @OA\JsonContent(
+     *             required={"nip","employee_name","tahun","bulan","gaji_pokok"},
+     *             @OA\Property(property="nip", type="string", example="EMP001"),
+     *             @OA\Property(property="employee_name", type="string", example="Farhan Chanafi"),
+     *             @OA\Property(property="tahun", type="integer", example=2026),
+     *             @OA\Property(property="bulan", type="integer", minimum=1, maximum=12, example=6),
+     *             @OA\Property(property="gaji_pokok", type="number", minimum=0, example=5000000),
+     *             @OA\Property(property="tunjangan_tetap", type="number", minimum=0, example=1000000),
+     *             @OA\Property(property="jumlah_hadir", type="integer", minimum=0, example=20),
+     *             @OA\Property(property="jumlah_izin", type="integer", minimum=0, example=1),
+     *             @OA\Property(property="jumlah_sakit", type="integer", minimum=0, example=1),
+     *             @OA\Property(property="jumlah_alpha", type="integer", minimum=0, example=2),
+     *             @OA\Property(property="status", type="string", example="Selesai")
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=201,
+     *         description="Payroll slip created successfully",
+     *         @OA\JsonContent(
+     *             type="object",
+     *             @OA\Property(property="status", type="string", example="success"),
+     *             @OA\Property(property="message", type="string", example="Payroll slip created successfully"),
+     *             @OA\Property(property="data", ref="#/components/schemas/PayrollSlip"),
+     *             @OA\Property(
+     *                 property="meta",
+     *                 type="object",
+     *                 @OA\Property(property="service_name", type="string", example="Payroll-Service"),
+     *                 @OA\Property(property="api_version", type="string", example="v1")
+     *             )
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=422,
+     *         description="Validation failed",
+     *         @OA\JsonContent(
+     *             type="object",
+     *             @OA\Property(property="status", type="string", example="error"),
+     *             @OA\Property(property="message", type="string", example="Validation failed"),
+     *             @OA\Property(property="errors", type="object")
+     *         )
+     *     ),
+     *     @OA\Response(response=401, description="Unauthorized")
+     * )
+     */
+    public function store(Request $request)
+    {
+        $validator = Validator::make($request->all(), [
+            'nip' => 'required|string|max:50',
+            'employee_name' => 'required|string|max:255',
+            'tahun' => 'required|integer|min:2000|max:2100',
+            'bulan' => 'required|integer|min:1|max:12',
+            'gaji_pokok' => 'required|numeric|min:0',
+            'tunjangan_tetap' => 'nullable|numeric|min:0',
+            'jumlah_hadir' => 'nullable|integer|min:0',
+            'jumlah_izin' => 'nullable|integer|min:0',
+            'jumlah_sakit' => 'nullable|integer|min:0',
+            'jumlah_alpha' => 'nullable|integer|min:0',
+            'status' => 'nullable|string|max:50',
+        ]);
+
+        if ($validator->fails()) {
+            return $this->errorResponse('Validation failed', $validator->errors(), 422);
+        }
+
+        $data = $validator->validated();
+        $jumlahAlpha = (int) ($data['jumlah_alpha'] ?? 0);
+        $gajiPokok = (float) $data['gaji_pokok'];
+        $tunjanganTetap = (float) ($data['tunjangan_tetap'] ?? 0);
+        $potonganAbsensi = $jumlahAlpha * 100_000;
+
+        $payrollSlip = PayrollSlip::updateOrCreate(
+            [
+                'nip' => $data['nip'],
+                'tahun' => (int) $data['tahun'],
+                'bulan' => (int) $data['bulan'],
+            ],
+            [
+                'employee_name' => $data['employee_name'],
+                'gaji_pokok' => $gajiPokok,
+                'tunjangan_tetap' => $tunjanganTetap,
+                'jumlah_hadir' => (int) ($data['jumlah_hadir'] ?? 0),
+                'jumlah_izin' => (int) ($data['jumlah_izin'] ?? 0),
+                'jumlah_sakit' => (int) ($data['jumlah_sakit'] ?? 0),
+                'jumlah_alpha' => $jumlahAlpha,
+                'potongan_absensi' => $potonganAbsensi,
+                'total_gaji' => $gajiPokok + $tunjanganTetap - $potonganAbsensi,
+                'status' => $data['status'] ?? 'Selesai',
+            ]
+        );
+
+        return $this->successResponse('Payroll slip created successfully', $payrollSlip, 201);
+    }
+
+    /**
+     * @OA\Get(
+     *     path="/api/v1/payroll-slips/{nip}/{tahun}/{bulan}",
+     *     summary="Menampilkan detail slip gaji berdasarkan NIP, tahun, dan bulan",
+     *     tags={"Payroll"},
+     *     security={{"iaeKey":{}}},
+     *     @OA\Parameter(name="nip",   in="path", required=true, @OA\Schema(type="string",  example="EMP001")),
+     *     @OA\Parameter(name="tahun", in="path", required=true, @OA\Schema(type="integer", example=2026)),
+     *     @OA\Parameter(name="bulan", in="path", required=true, @OA\Schema(type="integer", example=5)),
+     *     @OA\Response(response=200, description="Payroll slip retrieved successfully"),
+     *     @OA\Response(response=404, description="Payroll slip not found"),
+     *     @OA\Response(response=401, description="Unauthorized")
+     * )
+     */
     public function showByPeriod($nip, $tahun, $bulan)
     {
         $payrollSlip = PayrollSlip::where('nip', $nip)
@@ -121,221 +285,242 @@ class PayrollController extends Controller
             ->where('bulan', $bulan)
             ->first();
 
-        if (!$payrollSlip) {
+        if (! $payrollSlip) {
             return $this->errorResponse('Payroll slip not found', null, 404);
         }
 
-        return $this->successResponse(
-            'Payroll slip retrieved successfully',
-            $payrollSlip
-        );
+        return $this->successResponse('Payroll slip retrieved successfully', $payrollSlip);
     }
-/**
- * @OA\Post(
- *     path="/api/v1/payroll-runs",
- *     summary="Menjalankan proses payroll bulanan",
- *     tags={"Payroll"},
- *     security={{"iaeKey":{}}},
- *     @OA\RequestBody(
- *         required=true,
- *         @OA\JsonContent(
- *             required={"nip","employee_name","tahun","bulan","gaji_pokok","tunjangan_tetap","jumlah_hadir","jumlah_izin","jumlah_sakit","jumlah_alpha"},
- *             @OA\Property(property="nip", type="string", example="EMP001"),
- *             @OA\Property(property="employee_name", type="string", example="Farhan Chanafi"),
- *             @OA\Property(property="tahun", type="integer", example=2026),
- *             @OA\Property(property="bulan", type="integer", example=5),
- *             @OA\Property(property="gaji_pokok", type="number", example=5000000),
- *             @OA\Property(property="tunjangan_tetap", type="number", example=1000000),
- *             @OA\Property(property="jumlah_hadir", type="integer", example=20),
- *             @OA\Property(property="jumlah_izin", type="integer", example=1),
- *             @OA\Property(property="jumlah_sakit", type="integer", example=1),
- *             @OA\Property(property="jumlah_alpha", type="integer", example=2)
- *         )
- *     ),
- *     @OA\Response(
- *         response=201,
- *         description="Payroll processed successfully"
- *     ),
- *     @OA\Response(
- *         response=422,
- *         description="Validation failed"
- *     ),
- *     @OA\Response(
- *         response=401,
- *         description="Unauthorized"
- *     )
- * )
- */
+
+    /**
+     * @OA\Post(
+     *     path="/api/v1/payroll-runs",
+     *     summary="Menjalankan proses payroll bulanan (End-to-End otomatis)",
+     *     description="Sistem mengambil data karyawan dari Employee Service dan rekap kehadiran dari Absensi Service secara otomatis, lalu menghitung dan menyimpan slip gaji. Diakhiri dengan SSO → SOAP Audit → RabbitMQ broadcast.",
+     *     tags={"Payroll"},
+     *     security={{"iaeKey":{}}},
+     *     @OA\RequestBody(
+     *         required=true,
+     *         @OA\JsonContent(
+     *             required={"nip","tahun","bulan"},
+     *             @OA\Property(property="nip",   type="string",  example="EMP001",
+     *                          description="employee_id karyawan (sama dengan di Employee Service dan Absensi Service)"),
+     *             @OA\Property(property="tahun", type="integer", example=2026),
+     *             @OA\Property(property="bulan", type="integer", example=5, minimum=1, maximum=12)
+     *         )
+     *     ),
+     *     @OA\Response(response=201, description="Payroll processed successfully"),
+     *     @OA\Response(response=422, description="Validation failed"),
+     *     @OA\Response(response=502, description="Employee/Absensi Service tidak dapat dihubungi"),
+     *     @OA\Response(response=401, description="Unauthorized")
+     * )
+     *
+     * Alur end-to-end:
+     *   1. Validasi input (nip, tahun, bulan)
+     *   2. Ambil data karyawan dari Employee Service (Dimas)
+     *      → GET /api/v1/employees/{nip} → name, base_salary, fixed_allowance
+     *   3. Ambil rekap absensi dari Absensi Service (Dylan)
+     *      → GET /api/v1/attendances/summary/{nip}/{tahun}/{bulan}
+     *      → jumlah hadir/izin/sakit/alpha
+     *   4. Hitung gaji: total = base_salary + fixed_allowance - (alpha × Rp100.000)
+     *   5. SSO Login → dapat JWT
+     *   6. SOAP Audit → dapat ReceiptNumber
+     *   7. RabbitMQ Broadcast → event published
+     */
     public function runPayroll(
-    Request $request,
-    IaeCloudSsoService $ssoService,
-    IaeSoapAuditService $soapAuditService,
-    IaeRabbitMqPublisherService $publisherService
-) {
-    $validator = Validator::make($request->all(), [
-        'nip' => 'required|string',
-        'employee_name' => 'required|string',
-        'tahun' => 'required|integer',
-        'bulan' => 'required|integer|min:1|max:12',
-        'gaji_pokok' => 'required|numeric|min:0',
-        'tunjangan_tetap' => 'required|numeric|min:0',
-        'jumlah_hadir' => 'required|integer|min:0',
-        'jumlah_izin' => 'required|integer|min:0',
-        'jumlah_sakit' => 'required|integer|min:0',
-        'jumlah_alpha' => 'required|integer|min:0',
-    ]);
+        Request $request,
+        EmployeeServiceClient $empClient,
+        AbsensiServiceClient $absClient,
+        IaeCloudSsoService $ssoService,
+        IaeSoapAuditService $soapAuditService,
+        IaeRabbitMqPublisherService $publisherService
+    ) {
+        // ── 1. Validasi input ─────────────────────────────────────────────────
+        $validator = Validator::make($request->all(), [
+            'nip'   => 'required|string|max:50',
+            'tahun' => 'required|integer|min:2020|max:2099',
+            'bulan' => 'required|integer|min:1|max:12',
+        ]);
 
-    if ($validator->fails()) {
-        return $this->errorResponse(
-            'Validation failed',
-            $validator->errors(),
-            422
-        );
-    }
+        if ($validator->fails()) {
+            return $this->errorResponse('Validation failed', $validator->errors(), 422);
+        }
 
-    // 1. Ambil token dari Cloud SSO Dosen
-    $tokenResponse = $ssoService->getTokenByApiKey();
+        $nip   = $request->nip;
+        $tahun = (int) $request->tahun;
+        $bulan = (int) $request->bulan;
 
-    if (!$tokenResponse['success']) {
-        return $this->errorResponse(
-            'Failed to get token from IAE Cloud SSO',
-            $tokenResponse['body'],
-            $tokenResponse['status_code']
-        );
-    }
+        // ── 2. Ambil data karyawan dari Service A (Dimas) ─────────────────────
+        $empResult = $empClient->getByNip($nip);
+        if (! $empResult['success']) {
+            return $this->errorResponse(
+                "Gagal mengambil data karyawan '{$nip}' dari Employee Service.",
+                ['employee_service_error' => $empResult['error'],
+                 'status_code'           => $empResult['status_code']],
+                502
+            );
+        }
+        $emp = $empResult['data'];
 
-    $token = $ssoService->extractToken($tokenResponse['body']);
+        // Pastikan karyawan aktif (status 'active')
+        if (strtolower($emp['status'] ?? '') !== 'active') {
+            return $this->errorResponse(
+                "Karyawan '{$nip}' tidak aktif (status: {$emp['status']}). Payroll dibatalkan.",
+                null, 422
+            );
+        }
 
-    if (!$token) {
-        return $this->errorResponse(
-            'Token was not found in SSO response',
-            $tokenResponse['body'],
-            500
-        );
-    }
+        // ── 3. Ambil rekap absensi dari Service B (Dylan) ─────────────────────
+        $absResult = $absClient->getMonthlySummary($nip, $tahun, $bulan);
+        if (! $absResult['success']) {
+            return $this->errorResponse(
+                "Gagal mengambil rekap absensi '{$nip}' bulan {$bulan}/{$tahun} dari Absensi Service.",
+                ['absensi_service_error' => $absResult['error'],
+                 'status_code'          => $absResult['status_code']],
+                502
+            );
+        }
+        $abs = $absResult['data'];
 
-    // 2. Decode JWT dan mapping ke role lokal
-    $payload = $ssoService->decodeJwtPayload($token);
-    $localUser = $ssoService->mapPayloadToLocalRole($payload);
+        // ── 4. SSO Login → JWT ────────────────────────────────────────────────
+        $tokenResponse = $ssoService->getTokenByApiKey();
+        if (! $tokenResponse['success']) {
+            return $this->errorResponse(
+                'Failed to get token from IAE Cloud SSO',
+                $tokenResponse['body'],
+                $tokenResponse['status_code']
+            );
+        }
+        $token = $ssoService->extractToken($tokenResponse['body']);
+        if (! $token) {
+            return $this->errorResponse('Token was not found in SSO response', $tokenResponse['body'], 500);
+        }
 
-    if (($localUser['local_role'] ?? null) !== 'HR_ADMIN') {
-        return $this->errorResponse(
-            'User does not have permission to run payroll',
-            $localUser,
-            403
-        );
-    }
+        $payload   = $ssoService->decodeJwtPayload($token);
+        $localUser = $ssoService->mapPayloadToLocalRole($payload);
 
-    // 3. Proses perhitungan payroll
-    $potonganPerAlpha = 100000;
-    $potonganAbsensi = $request->jumlah_alpha * $potonganPerAlpha;
+        if (($localUser['local_role'] ?? null) !== 'HR_ADMIN') {
+            return $this->errorResponse('User does not have permission to run payroll', $localUser, 403);
+        }
 
-    $totalGaji = $request->gaji_pokok
-        + $request->tunjangan_tetap
-        - $potonganAbsensi;
+        // ── 5. Hitung gaji ────────────────────────────────────────────────────
+        $gajiPokok      = (float) ($emp['base_salary']      ?? 0);
+        $tunjanganTetap = (float) ($emp['fixed_allowance']   ?? 0);
+        $jumlahAlpha    = (int)   ($abs['jumlah_alpha']      ?? 0);
+        $potonganAbsensi = $jumlahAlpha * 100_000;          // Rp100.000 per hari alpha
+        $totalGaji       = $gajiPokok + $tunjanganTetap - $potonganAbsensi;
 
-    $payrollSlip = PayrollSlip::updateOrCreate(
-        [
-            'nip' => $request->nip,
-            'tahun' => $request->tahun,
-            'bulan' => $request->bulan,
-        ],
-        [
-            'employee_name' => $request->employee_name,
-            'gaji_pokok' => $request->gaji_pokok,
-            'tunjangan_tetap' => $request->tunjangan_tetap,
-            'jumlah_hadir' => $request->jumlah_hadir,
-            'jumlah_izin' => $request->jumlah_izin,
-            'jumlah_sakit' => $request->jumlah_sakit,
-            'jumlah_alpha' => $request->jumlah_alpha,
-            'potongan_absensi' => $potonganAbsensi,
-            'total_gaji' => $totalGaji,
-            'status' => 'Selesai',
-        ]
-    );
-
-    // 4. Kirim SOAP Audit
-    $auditPayload = [
-        'activity_name' => 'PayrollRunCreated',
-        'log_content' => [
-            'service' => 'Payroll-Service',
-            'activity' => 'PayrollRunCreated',
-            'subject' => $localUser['subject'] ?? null,
-            'local_role' => $localUser['local_role'] ?? null,
-            'endpoint' => 'POST /api/v1/payroll-runs',
-            'nip' => $payrollSlip->nip,
-            'tahun' => $payrollSlip->tahun,
-            'bulan' => $payrollSlip->bulan,
-            'total_gaji' => $payrollSlip->total_gaji,
-            'status' => $payrollSlip->status,
-        ],
-    ];
-
-    $auditResponse = $soapAuditService->sendAudit($token, $auditPayload);
-
-    if (!$auditResponse['success']) {
-        return $this->errorResponse(
-            'Failed to send SOAP audit to IAE Cloud',
+        $payrollSlip = PayrollSlip::updateOrCreate(
+            ['nip' => $nip, 'tahun' => $tahun, 'bulan' => $bulan],
             [
-                'status_code' => $auditResponse['status_code'],
-                'raw_response' => $auditResponse['raw_response'],
-            ],
-            $auditResponse['status_code']
+                'employee_name'    => $emp['name'],
+                'gaji_pokok'       => $gajiPokok,
+                'tunjangan_tetap'  => $tunjanganTetap,
+                'jumlah_hadir'     => $abs['jumlah_hadir']  ?? 0,
+                'jumlah_izin'      => $abs['jumlah_izin']   ?? 0,
+                'jumlah_sakit'     => $abs['jumlah_sakit']  ?? 0,
+                'jumlah_alpha'     => $jumlahAlpha,
+                'potongan_absensi' => $potonganAbsensi,
+                'total_gaji'       => $totalGaji,
+                'status'           => 'Selesai',
+            ]
         );
-    }
 
-    // 5. Simpan ReceiptNumber dari SOAP ke database
-    $payrollSlip->soap_receipt_number = $auditResponse['receipt_number'];
-    $payrollSlip->save();
+        // ── 6. SOAP Audit ─────────────────────────────────────────────────────
+        $auditPayload = [
+            'activity_name' => 'PayrollRunCreated',
+            'log_content'   => [
+                'service'     => 'Payroll-Service',
+                'activity'    => 'PayrollRunCreated',
+                'subject'     => $localUser['subject']    ?? null,
+                'local_role'  => $localUser['local_role'] ?? null,
+                'endpoint'    => 'POST /api/v1/payroll-runs',
+                'nip'         => $payrollSlip->nip,
+                'tahun'       => $payrollSlip->tahun,
+                'bulan'       => $payrollSlip->bulan,
+                'total_gaji'  => $payrollSlip->total_gaji,
+                'status'      => $payrollSlip->status,
+                'sources'     => [
+                    'employee_service' => env('EMPLOYEE_SERVICE_URL', 'http://employee-service:8000'),
+                    'absensi_service'  => env('ABSENSI_SERVICE_URL', 'http://absensi-service:80'),
+                ],
+            ],
+        ];
 
-    // 6. Publish event ke RabbitMQ
-    $eventPayload = [
-        'message' => [
-            'event' => 'payroll.processed',
-            'service' => 'Payroll-Service',
-            'team_id' => env('TEAM_ID', 'TEAM-10'),
-            'subject' => $localUser['subject'] ?? null,
-            'local_role' => $localUser['local_role'] ?? null,
-            'activity' => 'PayrollRunCreated',
-            'endpoint' => 'POST /api/v1/payroll-runs',
-            'nip' => $payrollSlip->nip,
-            'tahun' => $payrollSlip->tahun,
-            'bulan' => $payrollSlip->bulan,
-            'total_gaji' => $payrollSlip->total_gaji,
-            'status' => $payrollSlip->status,
+        $auditResponse = $soapAuditService->sendAudit($token, $auditPayload);
+        if (! $auditResponse['success']) {
+            return $this->errorResponse(
+                'Failed to send SOAP audit to IAE Cloud',
+                ['status_code' => $auditResponse['status_code'], 'raw_response' => $auditResponse['raw_response']],
+                $auditResponse['status_code']
+            );
+        }
+
+        $payrollSlip->soap_receipt_number = $auditResponse['receipt_number'];
+        $payrollSlip->save();
+
+        // ── 7. RabbitMQ Broadcast ─────────────────────────────────────────────
+        $eventPayload = [
+            'message' => [
+                'event'       => 'payroll.processed',
+                'service'     => 'Payroll-Service',
+                'team_id'     => env('TEAM_ID', 'TEAM-10'),
+                'subject'     => $localUser['subject']    ?? null,
+                'local_role'  => $localUser['local_role'] ?? null,
+                'activity'    => 'PayrollRunCreated',
+                'endpoint'    => 'POST /api/v1/payroll-runs',
+                'nip'         => $payrollSlip->nip,
+                'employee_name' => $emp['name'],
+                'tahun'       => $payrollSlip->tahun,
+                'bulan'       => $payrollSlip->bulan,
+                'total_gaji'  => $payrollSlip->total_gaji,
+                'status'      => $payrollSlip->status,
+                'soap_receipt_number' => $auditResponse['receipt_number'],
+                'integration' => [
+                    'employee_service' => 'OK',
+                    'absensi_service'  => 'OK',
+                    'sso'              => 'OK',
+                    'soap_audit'       => 'OK',
+                ],
+            ],
+        ];
+
+        $publishResponse = $publisherService->publish($token, $eventPayload);
+        if (! $publishResponse['success']) {
+            return $this->errorResponse(
+                'Failed to publish payroll event to IAE RabbitMQ',
+                ['status_code' => $publishResponse['status_code'], 'body' => $publishResponse['body']],
+                $publishResponse['status_code']
+            );
+        }
+
+        $payrollSlip->refresh();
+        $responseData = $payrollSlip->toArray();
+        $responseData['sources'] = [
+            'employee' => [
+                'employee_id'     => $emp['employee_id'],
+                'name'            => $emp['name'],
+                'department'      => $emp['department'],
+                'position'        => $emp['position'],
+                'base_salary'     => $gajiPokok,
+                'fixed_allowance' => $tunjanganTetap,
+                'status'          => $emp['status'],
+            ],
+            'attendance_summary' => $abs,
+        ];
+        $responseData['cloud_integration'] = [
+            'sso_subject'         => $localUser['subject']         ?? null,
+            'local_role'          => $localUser['local_role']       ?? null,
+            'soap_status'         => $auditResponse['soap_status'],
             'soap_receipt_number' => $auditResponse['receipt_number'],
-        ],
-    ];
+            'rabbitmq_status'     => $publishResponse['body']['status']   ?? null,
+            'rabbitmq_exchange'   => $publishResponse['body']['exchange']  ?? null,
+        ];
 
-    $publishResponse = $publisherService->publish($token, $eventPayload);
-
-    if (!$publishResponse['success']) {
-        return $this->errorResponse(
-            'Failed to publish payroll event to IAE RabbitMQ',
-            [
-                'status_code' => $publishResponse['status_code'],
-                'body' => $publishResponse['body'],
-            ],
-            $publishResponse['status_code']
+        return $this->successResponse(
+            'Payroll processed successfully with SSO, SOAP Audit, and RabbitMQ',
+            $responseData,
+            201
         );
     }
-
-    $payrollSlip->refresh();
-
-    $responseData = $payrollSlip->toArray();
-    $responseData['cloud_integration'] = [
-        'sso_subject' => $localUser['subject'] ?? null,
-        'local_role' => $localUser['local_role'] ?? null,
-        'soap_status' => $auditResponse['soap_status'],
-        'soap_receipt_number' => $auditResponse['receipt_number'],
-        'rabbitmq_status' => $publishResponse['body']['status'] ?? null,
-        'rabbitmq_exchange' => $publishResponse['body']['exchange'] ?? null,
-    ];
-
-    return $this->successResponse(
-        'Payroll processed successfully with SSO, SOAP Audit, and RabbitMQ',
-        $responseData,
-        201
-    );
-}
 }
