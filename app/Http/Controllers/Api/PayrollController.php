@@ -218,12 +218,16 @@ class PayrollController extends Controller
     public function store(Request $request)
     {
         $validator = Validator::make($request->all(), [
-            'nip' => 'required|string|max:50',
-            'employee_name' => 'required|string|max:255',
-            'tahun' => 'required|integer|min:2000|max:2100',
-            'bulan' => 'required|integer|min:1|max:12',
-            'gaji_pokok' => 'required|numeric|min:0',
+            'nip' => 'nullable|string|max:50',
+            'employee_id' => 'nullable|string|max:50',
+            'employee_name' => 'nullable|string|max:255',
+            'name' => 'nullable|string|max:255',
+            'tahun' => 'nullable|integer|min:2000|max:2100',
+            'bulan' => 'nullable|integer|min:1|max:12',
+            'gaji_pokok' => 'nullable|numeric|min:0',
+            'base_salary' => 'nullable|numeric|min:0',
             'tunjangan_tetap' => 'nullable|numeric|min:0',
+            'fixed_allowance' => 'nullable|numeric|min:0',
             'jumlah_hadir' => 'nullable|integer|min:0',
             'jumlah_izin' => 'nullable|integer|min:0',
             'jumlah_sakit' => 'nullable|integer|min:0',
@@ -236,19 +240,33 @@ class PayrollController extends Controller
         }
 
         $data = $validator->validated();
+        $now = now();
+        $nip = trim((string) ($data['nip'] ?? $data['employee_id'] ?? ''));
+        $employeeName = trim((string) ($data['employee_name'] ?? $data['name'] ?? ''));
+
+        if ($nip === '') {
+            $nip = 'T2-' . $now->format('YmdHis') . '-' . \Illuminate\Support\Str::upper(\Illuminate\Support\Str::random(6));
+        }
+
+        if ($employeeName === '') {
+            $employeeName = 'Employee Tugas 2';
+        }
+
+        $tahun = (int) ($data['tahun'] ?? $now->year);
+        $bulan = (int) ($data['bulan'] ?? $now->month);
         $jumlahAlpha = (int) ($data['jumlah_alpha'] ?? 0);
-        $gajiPokok = (float) $data['gaji_pokok'];
-        $tunjanganTetap = (float) ($data['tunjangan_tetap'] ?? 0);
+        $gajiPokok = (float) ($data['gaji_pokok'] ?? $data['base_salary'] ?? 0);
+        $tunjanganTetap = (float) ($data['tunjangan_tetap'] ?? $data['fixed_allowance'] ?? 0);
         $potonganAbsensi = $jumlahAlpha * 100_000;
 
         $payrollSlip = PayrollSlip::updateOrCreate(
             [
-                'nip' => $data['nip'],
-                'tahun' => (int) $data['tahun'],
-                'bulan' => (int) $data['bulan'],
+                'nip' => $nip,
+                'tahun' => $tahun,
+                'bulan' => $bulan,
             ],
             [
-                'employee_name' => $data['employee_name'],
+                'employee_name' => $employeeName,
                 'gaji_pokok' => $gajiPokok,
                 'tunjangan_tetap' => $tunjanganTetap,
                 'jumlah_hadir' => (int) ($data['jumlah_hadir'] ?? 0),
